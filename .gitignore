@@ -1,0 +1,9 @@
+# build output
+claude_quest
+test_quest
+shots/
+
+# your local progress
+save.txt
+
+.DS_Store
