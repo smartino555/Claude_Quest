@@ -2,11 +2,14 @@
 
 An RPG that teaches you Claude, from writing your first good prompt to building agents. There are ten regions. Each one has a mentor who teaches a topic, battles where foes attack with questions, and a boss guarding the road to the next region. Every region builds on the ones before it, and battles keep pulling in review questions from earlier regions.
 
+This is an unofficial, fan-made learning project. It is not affiliated with or endorsed by Anthropic. Claude is a trademark of Anthropic. The curriculum was written without checking Anthropic's current docs, so some details may be out of date; see [docs.claude.com](https://docs.claude.com) for the authoritative versions.
+
 ## Build & run (macOS)
 
 ```sh
 brew install raylib          # one time
-cd C_Games/Learn_Claude
+git clone https://github.com/smartino555/Claude_Quest.git
+cd Claude_Quest
 make
 ./claude_quest
 ```
@@ -80,3 +83,7 @@ The mouse works everywhere too.
 - `src/context.c`: the Context note for each question. `CONTEXT[r][i]` belongs to question `i` of region `r`, so keep the two files in the same order.
 - `src/game.c`: progression, battle rules, question selection (the no-repeat rule) and save/load. It doesn't use raylib, so the tests link it directly.
 - `src/main.c`: the raylib front end (screens, drawing, input).
+
+## License
+
+MIT, see [LICENSE](LICENSE). The bundled Inter font subsets are under the SIL Open Font License; see `assets/FONTS-LICENSE.txt`.
