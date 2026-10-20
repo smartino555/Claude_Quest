@@ -60,49 +60,53 @@ static void gainXp(Player *p, int xp, int *levels) {
 
 // ---------------------------------------------------------------- question picking
 
-// Earlier regions come back as review: 30% of normal battles, 40% of bosses,
-// half of the final boss. Questions you got wrong come back more often.
-static int pickRegion(Battle *b, const Player *p) {
+// No repeats: a battle in region R draws on regions 0..R, and only ever deals one
+// of the least-dealt questions there. So nothing comes back until every question
+// you can be asked has been dealt as often. Among those, earlier regions come back
+// as review (30% of normal battles, 40% of bosses, half of the final boss) while
+// they have any left, and questions you got wrong are favoured.
+static int reviewShare(const Battle *b) {
     if (b->region == 0) return 0;
-    int share = b->boss ? (b->region == NREGIONS - 1 ? 50 : 40) : 30;
-    if (rngInt(&b->rng, 100) >= share) return b->region;
-    int w[NREGIONS], tot = 0;
-    for (int r = 0; r < b->region; r++) {
-        int miss = 0;
-        for (int i = 0; i < NQ; i++) miss += p->wrong[r][i];
-        w[r] = 3 + miss;
-        tot += w[r];
-    }
-    int x = rngInt(&b->rng, tot);
-    for (int r = 0; r < b->region; r++) {
-        if (x < w[r]) return r;
-        x -= w[r];
-    }
-    return b->region - 1;
+    return b->boss ? (b->region == NREGIONS - 1 ? 50 : 40) : 30;
 }
 
-static void nextQuestion(Battle *b, const Player *p) {
-    int r = pickRegion(b, p);
-    int w[NQ], tot = 0;
-    for (int pass = 0; pass < 2 && tot == 0; pass++) {
-        if (pass == 1) memset(b->used[r], 0, sizeof b->used[r]);   // region exhausted: start over
-        for (int i = 0; i < NQ; i++) {
-            w[i] = 0;
-            if (b->used[r][i] || (r == b->qr && i == b->qi && pass == 1)) continue;
-            int x = 3 + 4 * p->wrong[r][i] - (p->right[r][i] > 2 ? 2 : p->right[r][i]);
-            w[i] = x < 1 ? 1 : x;
-            tot += w[i];
+static void nextQuestion(Battle *b, Player *p) {
+    int least = -1;
+    for (int pass = 0; pass < 2 && least < 0; pass++) {
+        if (pass == 1) {                                   // all asked this battle: start over,
+            memset(b->used, 0, sizeof b->used);            // but not with the one just asked
+            if (b->qr >= 0) b->used[b->qr][b->qi] = true;
         }
+        for (int r = 0; r <= b->region; r++)
+            for (int i = 0; i < NQ; i++)
+                if (!b->used[r][i] && (least < 0 || p->seen[r][i] < least)) least = p->seen[r][i];
     }
-    int x = rngInt(&b->rng, tot), q = 0;
-    for (int i = 0; i < NQ; i++) {
-        if (!w[i]) continue;
-        if (x < w[i]) { q = i; break; }
-        x -= w[i];
-    }
-    b->qr = r;
-    b->qi = q;
-    b->used[r][q] = true;
+    bool own = false, old = false;
+    for (int r = 0; r <= b->region; r++)
+        for (int i = 0; i < NQ; i++)
+            if (!b->used[r][i] && p->seen[r][i] == least) { if (r == b->region) own = true; else old = true; }
+    bool review = old && (!own || rngInt(&b->rng, 100) < reviewShare(b));
+
+    int w[NREGIONS][NQ], tot = 0;
+    for (int r = 0; r <= b->region; r++)
+        for (int i = 0; i < NQ; i++) {
+            w[r][i] = 0;
+            if (b->used[r][i] || p->seen[r][i] != least || (r != b->region) != review) continue;
+            int x = 3 + 4 * p->wrong[r][i] - (p->right[r][i] > 2 ? 2 : p->right[r][i]);
+            w[r][i] = x < 1 ? 1 : x;
+            tot += w[r][i];
+        }
+    int x = rngInt(&b->rng, tot), qr = 0, qi = 0;
+    for (int r = 0; r <= b->region; r++)
+        for (int i = 0; i < NQ; i++) {
+            if (!w[r][i]) continue;
+            if (x >= 0 && x < w[r][i]) { qr = r; qi = i; }
+            x -= w[r][i];
+        }
+    b->qr = qr;
+    b->qi = qi;
+    b->used[qr][qi] = true;
+    p->seen[qr][qi]++;
     for (int i = 0; i < 4; i++) { b->order[i] = i; b->hidden[i] = false; }
     for (int i = 3; i > 0; i--) {
         int j = rngInt(&b->rng, i + 1), t = b->order[i];
@@ -286,13 +290,14 @@ void battleContinue(Battle *b, Player *p) {
 bool saveGame(const Player *p, const char *path) {
     FILE *f = fopen(path, "w");
     if (!f) return false;
-    fprintf(f, "claudequest 1\n");
+    fprintf(f, "claudequest 2\n");
     fprintf(f, "player %d %d %d %d %d %d %d %d\n", p->level, p->xp, p->hp, p->tokens, p->unlocked,
             p->battles, p->answered, p->correct);
     for (int r = 0; r < NREGIONS; r++) {
         fprintf(f, "region %d %d %d %d\n", r, p->pagesRead[r], p->wins[r], p->bossBeaten[r] ? 1 : 0);
         for (int i = 0; i < NQ; i++)
-            if (p->right[r][i] || p->wrong[r][i]) fprintf(f, "q %d %d %d %d\n", r, i, p->right[r][i], p->wrong[r][i]);
+            if (p->right[r][i] || p->wrong[r][i] || p->seen[r][i])
+                fprintf(f, "q %d %d %d %d %d\n", r, i, p->right[r][i], p->wrong[r][i], p->seen[r][i]);
     }
     return fclose(f) == 0;
 }
@@ -306,7 +311,7 @@ bool loadGame(Player *p, const char *path) {
     int ver = 0;
     bool havePlayer = false;
     while (fgets(line, sizeof line, f)) {
-        int a, b, c, d, e, g, h, k;
+        int a, b, c, d, e, g, h, k, n;
         if (sscanf(line, "claudequest %d", &a) == 1) ver = a;
         else if (sscanf(line, "player %d %d %d %d %d %d %d %d", &a, &b, &c, &d, &e, &g, &h, &k) == 8) {
             t.level = a < 1 ? 1 : a;
@@ -319,14 +324,16 @@ bool loadGame(Player *p, const char *path) {
             t.pagesRead[a] = b < 0 ? 0 : b > NPAGES ? NPAGES : b;
             t.wins[a] = c < 0 ? 0 : c;
             t.bossBeaten[a] = d != 0;
-        } else if (sscanf(line, "q %d %d %d %d", &a, &b, &c, &d) == 4) {
+        } else if ((n = sscanf(line, "q %d %d %d %d %d", &a, &b, &c, &d, &e)) >= 4) {
             if (a < 0 || a >= NREGIONS || b < 0 || b >= NQ) continue;
-            t.right[a][b] = c;
-            t.wrong[a][b] = d;
+            t.right[a][b] = c < 0 ? 0 : c;
+            t.wrong[a][b] = d < 0 ? 0 : d;
+            // version 1 saves had no dealt count; every answer was one deal
+            t.seen[a][b] = n == 5 && e >= 0 ? e : t.right[a][b] + t.wrong[a][b];
         }
     }
     fclose(f);
-    if (ver != 1 || !havePlayer) return false;
+    if ((ver != 1 && ver != 2) || !havePlayer) return false;
     if (t.hp < 1 || t.hp > maxHp(&t)) t.hp = maxHp(&t);
     if (t.tokens < 0 || t.tokens > maxTokens(&t)) t.tokens = maxTokens(&t);
     *p = t;

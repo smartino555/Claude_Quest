@@ -4,7 +4,7 @@
 
 #define NREGIONS 10
 #define NPAGES 5
-#define NQ 12
+#define NQ 48
 
 typedef struct { const char *q; const char *opt[4]; int ans; const char *why; } Question;
 typedef struct { const char *title; const char *body; } Page;

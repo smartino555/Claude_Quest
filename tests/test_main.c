@@ -186,24 +186,62 @@ static void testWinLose(void) {
     CHECK(b.state == BS_WON && b.firstClear && !b.unlockedNew && p.unlocked == 9, "final boss");
 }
 
+// the least-dealt count among questions a battle in region reg could deal next (-1 if none)
+static int leastDealt(const Player *p, const Battle *b, int reg) {
+    int m = -1;
+    for (int r = 0; r <= reg; r++)
+        for (int i = 0; i < NQ; i++)
+            if (!(b && b->used[r][i]) && (m < 0 || p->seen[r][i] < m)) m = p->seen[r][i];
+    return m;
+}
+
 static void testQuestionMix(void) {
     Player p;
     playerNew(&p);
-    // no repeats within a battle until a region runs out
     Battle b;
-    battleStart(&b, &p, 0, false, 11);
-    b.hp = 1 << 30;
-    bool seen[NQ] = { 0 };
-    for (int i = 0; i < NQ; i++) {
-        CHECK(!seen[b.qi], "repeat before exhausting region (turn %d)", i);
-        seen[b.qi] = true;
-        battleAnswer(&b, &p, correctSlot(&b));
-        battleContinue(&b, &p);
+    // no repeats across battles: every region-0 question is dealt once before any comes back,
+    // including ones left unanswered by leaving a battle early
+    int dealt = 0;
+    for (int k = 0; dealt < NQ && k < 100; k++) {
+        battleStart(&b, &p, 0, false, 11 + k);
+        b.hp = 1 << 30;
+        for (int t = 0;; t++) {
+            dealt++;
+            CHECK(p.seen[0][b.qi] == 1, "question %d dealt twice before all %d were dealt (deal %d)", b.qi, NQ, dealt);
+            if (t == 4 || dealt == NQ) break;              // leave mid-battle
+            battleAnswer(&b, &p, correctSlot(&b));
+            battleContinue(&b, &p);
+        }
     }
-    // review share, and mistakes come back more often
-    int review = 0, total = 0, missed = 0;
+    for (int i = 0; i < NQ; i++) CHECK(p.seen[0][i] == 1, "question %d dealt %d times in the first round", i, p.seen[0][i]);
+    battleStart(&b, &p, 0, false, 500);
+    CHECK(p.seen[0][b.qi] == 2, "second round starts once all are dealt");
+
+    // review only draws on earlier regions while they have undealt questions left
+    playerNew(&p);
+    int review = 0;
+    for (int k = 0; k < 200; k++) {
+        memset(p.seen, 0, sizeof p.seen);
+        for (int r = 0; r < 5; r++) for (int i = 0; i < NQ; i++) p.seen[r][i] = 1;
+        battleStart(&b, &p, 5, false, 3000 + k);
+        review += b.qr != 5;
+    }
+    CHECK(review == 0, "dealt review questions while region 5 had new ones (%d)", review);
+    review = 0;
+    for (int k = 0; k < 200; k++) {
+        memset(p.seen, 0, sizeof p.seen);
+        for (int i = 0; i < NQ; i++) p.seen[5][i] = 1;
+        battleStart(&b, &p, 5, false, 4000 + k);
+        review += b.qr != 5;
+    }
+    CHECK(review == 200, "dealt a region 5 repeat while review questions were new (%d of 200 review)", review);
+
+    // review share when everything is equally fresh, and mistakes come back more often
+    int total = 0, missed = 0;
+    review = 0;
     p.wrong[5][3] = 6;
     for (int k = 0; k < 400; k++) {
+        memset(p.seen, 0, sizeof p.seen);
         battleStart(&b, &p, 5, false, 1000 + k);
         total++;
         review += b.qr != 5;
@@ -213,6 +251,7 @@ static void testQuestionMix(void) {
     CHECK(missed > (total - review) / NQ * 2, "missed question favoured: %d of %d", missed, total - review);
     review = total = 0;
     for (int k = 0; k < 400; k++) {
+        memset(p.seen, 0, sizeof p.seen);
         battleStart(&b, &p, 9, true, 5000 + k);
         total++;
         review += b.qr != 9;
@@ -230,11 +269,18 @@ static void testSave(void) {
     p.level = 7; p.xp = 33; p.hp = 50; p.tokens = 12; p.unlocked = 4;
     p.pagesRead[2] = 5; p.wins[3] = 4; p.bossBeaten[1] = true;
     p.right[3][7] = 2; p.wrong[3][7] = 5; p.battles = 20; p.answered = 99; p.correct = 70;
+    p.seen[3][7] = 9; p.seen[9][NQ - 1] = 1;
     const char *path = "test_save.txt";
     CHECK(saveGame(&p, path), "save");
     CHECK(loadGame(&q, path), "load");
     CHECK(memcmp(&p, &q, sizeof p) == 0, "round trip");
+    // a version 1 save (12 questions a region, no dealt counts) still loads
     FILE *f = fopen(path, "w");
+    fputs("claudequest 1\nplayer 4 10 80 20 2 9 50 40\nregion 0 5 3 1\nq 0 11 2 1\n", f);
+    fclose(f);
+    CHECK(loadGame(&q, path) && q.level == 4 && q.unlocked == 2 && q.right[0][11] == 2 && q.wrong[0][11] == 1, "v1 save loads");
+    CHECK(q.seen[0][11] == 3 && q.seen[0][12] == 0, "v1 answers count as deals; new questions start undealt");
+    f = fopen(path, "w");
     fputs("not a save file\n", f);
     fclose(f);
     q.level = 99;
@@ -248,17 +294,27 @@ static void testPlaythrough(void) {
     Player p;
     playerNew(&p);
     Rng r = { 77 };
-    int battles = 0, turns = 0, losses = 0;
+    int battles = 0, turns = 0, losses = 0, repeats = 0;
     for (int reg = 0; reg < NREGIONS; reg++) {
         learnAll(&p, reg);
         while (!p.bossBeaten[reg] && battles < 2000) {
             Battle b;
             bool boss = bossOpen(&p, reg, NULL);
+            // every deal must be one of the least-dealt questions still available
+            int least = leastDealt(&p, NULL, reg);
             battleStart(&b, &p, reg, boss, 1234 + battles);
+            CHECK(p.seen[b.qr][b.qi] - 1 == least, "battle opened with a repeat while fresher questions remained");
+            repeats += p.seen[b.qr][b.qi] > 1;
             int guard = 0;
             while (b.state == BS_ASK && guard++ < 200) {
                 battleAnswer(&b, &p, rngInt(&r, 100) < 75 ? correctSlot(&b) : wrongSlot(&b));
+                int t0 = b.turns;
+                least = leastDealt(&p, &b, reg);
                 battleContinue(&b, &p);
+                if (b.turns > t0 && least >= 0) {
+                    CHECK(p.seen[b.qr][b.qi] - 1 == least, "dealt a repeat while fresher questions remained");
+                    repeats += p.seen[b.qr][b.qi] > 1;
+                }
             }
             CHECK(guard < 200, "battle never ended");
             battles++;
@@ -268,8 +324,8 @@ static void testPlaythrough(void) {
         }
     }
     CHECK(p.bossBeaten[NREGIONS - 1] && p.unlocked == NREGIONS - 1, "game completable");
-    printf("  playthrough at 75%% accuracy: %d battles, %.1f questions each, %d losses, final level %d\n",
-           battles, (double)turns / battles, losses, p.level);
+    printf("  playthrough at 75%% accuracy: %d battles, %.1f questions each, %d losses, final level %d, %d repeated questions\n",
+           battles, (double)turns / battles, losses, p.level, repeats);
 }
 
 int main(void) {

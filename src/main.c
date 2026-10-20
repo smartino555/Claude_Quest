@@ -1014,7 +1014,7 @@ static void DrawCodex(void) {
         }
         BeginClip(area);
         float y = area.y - codexScroll, y0 = y;
-        if (!n) Wrap(fReg, "No mistakes yet. Every question you miss in battle lands here with its correct answer and explanation, and it will come back more often in future battles until you get it right.", area.x, y + 10, 1000, 22, 32, C_DIM, true);
+        if (!n) Wrap(fReg, "No mistakes yet. Every question you miss in battle lands here with its correct answer and explanation. Once you have seen every question, the ones you missed come back first.", area.x, y + 10, 1000, 22, 32, C_DIM, true);
         for (int k = 0; k < n; k++) {
             int r = idx[k] / NQ, i = idx[k] % NQ;
             const Question *q = &REGIONS[r].qs[i];
@@ -1051,7 +1051,7 @@ static void DrawCodex(void) {
         for (int r = 0; r < NREGIONS; r++) {
             bool open = r <= pl.unlocked;
             int rt = 0, wr = 0, seen = 0;
-            for (int i = 0; i < NQ; i++) { rt += pl.right[r][i]; wr += pl.wrong[r][i]; seen += (pl.right[r][i] + pl.wrong[r][i]) > 0; }
+            for (int i = 0; i < NQ; i++) { rt += pl.right[r][i]; wr += pl.wrong[r][i]; seen += pl.seen[r][i] > 0; }
             DrawRectangleRounded((Rectangle){ area.x - 12, y - 8, area.width + 12, 48 }, 0.3f, 6, r % 2 ? C_BG : C_PANEL);
             DrawRectangle((int)area.x - 4, (int)y + 2, 5, 22, open ? RegionCol(r) : C_PANEL3);
             snprintf(s, sizeof s, "%d. %s", r + 1, open ? REGIONS[r].name : "???");
@@ -1069,7 +1069,7 @@ static void DrawCodex(void) {
             y += 54;
         }
         y += 20;
-        Wrap(fReg, "Battles mix in review questions from earlier regions (30% of normal battles, 40% of bosses, half of the final boss). Questions you have missed come back more often until you get them right.",
+        Wrap(fReg, "No question repeats until you have seen every question open to you. Battles mix in unseen questions from earlier regions (30% of normal battles, 40% of bosses, half of the final boss). After that, missed questions come back first.",
              area.x, y, 1100, 19, 27, C_DIM, true);
         y += 70;
         EndScissorMode();
@@ -1090,7 +1090,7 @@ static void DrawHelp(bool input) {
     const char *how =
         "You are an apprentice learning Claude, from your first prompt to building agents. There are ten regions, and each one builds on the last.\n\n"
         "In each region: read the mentor's five lessons (this teaches you an ability), win at least two battles, then defeat the boss to open the road to the next region.\n\n"
-        "Battles are questions. A correct answer strikes the foe; a wrong one lets it hit you, and shows you the right answer and why. Three correct in a row is a combo. Battles also bring back questions from earlier regions, and anything you have missed comes back more often.\n\n"
+        "Battles are questions. A correct answer strikes the foe; a wrong one lets it hit you, and shows you the right answer and why. Three correct in a row is a combo. Each region has 48 questions, and none repeats until you have seen them all; battles also mix in questions from earlier regions.\n\n"
         "Stuck on a question? Press C or the Context button for background on the ideas it uses. It is free, before or after you answer.\n\n"
         "Abilities cost tokens. Correct answers restore 3 tokens, and the inn restores everything. Each ability is modeled on the feature it is named after: Clarify, Extended Thinking, Version History, Web Search, /rewind, Load Skill, PostToolUse Hook, Spawn Subagent, Prompt Cache and Agent Loop.";
     Wrap(fReg, how, p.x + 60, p.y + 100, p.width - 120, 22, 31, C_TEXT, true);
@@ -1143,6 +1143,7 @@ static void FakeProgress(int upto) {
     pl.pagesRead[upto] = 2;
     pl.wins[upto] = 1;
     for (int i = 0; i < NQ; i++) { pl.right[0][i] = 2; pl.right[1][i] = i % 3; pl.wrong[1][i] = i % 4 == 0; pl.wrong[2][i] = i % 5 == 1; }
+    for (int r = 0; r < NREGIONS; r++) for (int i = 0; i < NQ; i++) pl.seen[r][i] = pl.right[r][i] + pl.wrong[r][i];
     pl.answered = 80; pl.correct = 64; pl.battles = 14;
     pl.hp = maxHp(&pl) - 30;
     pl.tokens = maxTokens(&pl) - 8;

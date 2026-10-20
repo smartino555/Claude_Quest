@@ -13,13 +13,13 @@ make
 
 The game needs raylib 5.5 or newer. It looks for the `assets/` folder next to the executable. Progress is saved to `save.txt` next to the executable.
 
-`make test` runs the test suite (`tests/test_main.c`, about 17,000 checks). It covers:
+`make test` runs the test suite (`tests/test_main.c`, about 240,000 checks). It covers:
 - **Curriculum integrity.** Every lesson, question and context note is present, ASCII-only (the font is an ASCII subset) and short enough to fit its box. Each question has 4 distinct options, a valid answer and an explanation, and no question appears twice.
 - **Progression.** Lessons unlock abilities, and a boss opens after its lessons plus 2 wins. A boss win unlocks the next region; rematches don't.
 - **Battle rules.** Damage, combos and every ability: stacking multipliers, rewind, cache pricing, hook healing and subagent strikes.
-- **Question mix.** No repeats inside a battle, about 30% review questions in normal battles and 50% in the final boss, missed questions return more often, and answer positions are shuffled.
-- **Save/load.** A save survives a round trip, and garbage files are rejected.
-- **Full playthrough.** A simulated player who is right 75% of the time can finish the whole game. Currently that takes about 31 battles of about 6 questions each, ending at level 13.
+- **No repeats.** Every question is dealt once before any comes back, across battles and even if you leave a battle early. Review questions are only used while earlier regions still have unseen ones. When everything is equally fresh, normal battles are about 30% review and the final boss about 50%. Missed questions are favoured, and answer positions are shuffled.
+- **Save/load.** A save survives a round trip, saves from before the question bank doubled still load, and garbage files are rejected.
+- **Full playthrough.** A simulated player who is right 75% of the time can finish the whole game. Currently that takes about 31 battles of about 6 questions each, ending at level 13, without a single repeated question.
 
 `make shots` renders every screen to `shots/`, which is handy for checking the layout after a change.
 
@@ -43,13 +43,15 @@ Each ability works like the feature it is named after, which reinforces the less
 ## How a region works
 
 1. **Lessons.** The mentor has five lesson pages. Reading all five teaches you the region's ability.
-2. **Battles.** Each correct answer hits the foe, and three in a row is a combo. A wrong answer lets the foe hit you, then shows the correct answer and why. Battles in later regions mix in review questions from earlier ones: 30% in normal battles, 40% against bosses and half against the final boss.
+2. **Battles.** Each correct answer hits the foe, and three in a row is a combo. A wrong answer lets the foe hit you, then shows the correct answer and why. Each region has 48 questions. Battles in later regions mix in unseen questions from earlier ones: 30% in normal battles, 40% against bosses and half against the final boss.
 3. **Boss.** It opens once you've read the lessons and won 2 battles. Beating it unlocks the next region.
 4. **Inn.** Resting restores your HP and tokens. Abilities cost tokens, and each correct answer gives back 3.
 
 **Context.** Stuck on a question? Press C, or the Context button at the bottom of the battle screen, for background on the ideas the question uses: what the terms mean and when you would use them in real work. For example, the question about `<contract>` tags explains what XML tags are for, with a sample prompt. It costs nothing, and it works before or after you answer.
 
-Losing a battle sends you back to the region with half your HP. Questions you miss come back more often until you get them right.
+Losing a battle sends you back to the region with half your HP.
+
+**No repeats.** A question is never dealt again until you have seen every question open to you (the current region and all earlier ones). A typical playthrough sees about 195 questions out of 480, so you will likely never see a repeat. Once everything has been seen, a new round starts and the questions you missed come first.
 
 ## Codex (J)
 
@@ -74,7 +76,7 @@ The mouse works everywhere too.
 
 ## Code layout
 
-- `src/content.c`: the whole curriculum (50 lesson pages, 120 questions, foes, abilities). Edit here to add or change material.
+- `src/content.c`: the whole curriculum (50 lesson pages, 480 questions, foes, abilities). Edit here to add or change material.
 - `src/context.c`: the Context note for each question. `CONTEXT[r][i]` belongs to question `i` of region `r`, so keep the two files in the same order.
-- `src/game.c`: progression, battle rules, question selection and save/load. It doesn't use raylib, so the tests link it directly.
+- `src/game.c`: progression, battle rules, question selection (the no-repeat rule) and save/load. It doesn't use raylib, so the tests link it directly.
 - `src/main.c`: the raylib front end (screens, drawing, input).

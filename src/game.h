@@ -26,6 +26,7 @@ typedef struct {
     int wins[NREGIONS];
     bool bossBeaten[NREGIONS];
     int right[NREGIONS][NQ], wrong[NREGIONS][NQ];
+    int seen[NREGIONS][NQ];               // times each question has been dealt
     int battles, answered, correct;       // lifetime totals
 } Player;
 
